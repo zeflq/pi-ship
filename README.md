@@ -130,6 +130,31 @@ PI_SHIP_CONFIG=/tmp/ship.json npm run ship:debug project-front
 A dry run reports the preflight verdict instead of aborting on it, so one command tells you about
 an archived repo, a credential mismatch and a bad config path together.
 
+### Testing gh for real — `live`
+
+A dry run never calls `git push` or `gh pr create`, so it cannot prove the part that actually
+fails: credentials. `live` pushes a branch with an **empty** commit, opens a draft PR, then closes
+the PR and deletes the branch again — no LLM turn, no real work shipped:
+
+```
+/ship-debug live project-front           # probe and clean up
+/ship-debug live project-front --keep    # leave the PR open to inspect
+```
+
+```
+── project-front — live probe ──
+   creating fix/DEBUG-1234 from origin/develop
+   committed 0 file(s) as fix(DEBUG-1234): ship debug probe
+   pushing fix/DEBUG-1234
+   opened https://github.com/org/project-front/pull/57
+   ✓ push and gh pr create both work
+   ✓ closed the PR and deleted origin/fix/DEBUG-1234
+```
+
+It leaves a closed PR in the repo's history — that is the cost of testing the real path. Cleanup is
+reported separately from the probe, so a probe that worked with a cleanup that did not never reads
+as a clean pass.
+
 ## Preflight
 
 Before creating anything, ship resolves the GitHub remote and refuses early when the repo is

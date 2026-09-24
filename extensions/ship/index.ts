@@ -9,7 +9,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { runShipCommand } from "./command.ts";
-import { shipDebug } from "./debug.ts";
+import { shipDebug, shipDebugLive } from "./debug.ts";
 import { CONFIG_PATH, loadConfig } from "./config.ts";
 import { ship, type ShipRequest } from "./ship.ts";
 
@@ -80,9 +80,13 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("ship-debug", {
-		description: "Dry-run ship with fake ticket DEBUG-1234 — reports the plan, changes nothing",
+		description: "Test ship without an LLM turn — dry by default, `live` pushes an empty probe PR and closes it",
 		handler: async (args, ctx) => {
-			const report = shipDebug(args.trim() || undefined);
+			const words = args.trim().split(/\s+/).filter(Boolean);
+			const live = words.includes("live");
+			const keep = words.includes("--keep");
+			const project = words.find((word) => word !== "live" && word !== "--keep");
+			const report = live ? shipDebugLive(project, { keep }) : shipDebug(project);
 			ctx.ui.notify(report.lines.join("\n"), report.ok ? "info" : "error");
 		},
 	});

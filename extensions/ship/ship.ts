@@ -29,6 +29,11 @@ export interface ShipRequest {
 	commitOnly?: boolean;
 	/** Report the plan and change nothing: no branch, no commit, no push. */
 	dryRun?: boolean;
+	/**
+	 * Debug only: commit nothing (an empty commit) and ignore the change set, so
+	 * the push and PR machinery can be exercised without shipping real work.
+	 */
+	probe?: boolean;
 }
 
 export interface ShipResult {
@@ -176,14 +181,14 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 	// Work starts on the base branch, so by default everything that differs from
 	// it is the ticket. An explicit list narrows that when a session mixed two
 	// pieces of work.
-	const autoSelected = request.files === undefined && request.remove === undefined;
+	const autoSelected = !request.probe && request.files === undefined && request.remove === undefined;
 	const detected = autoSelected ? collectChanges(repo, base) : undefined;
 	const files = normalizeFiles(repo, detected ? detected.files : (request.files ?? []));
 	const removals = (detected ? detected.removed : (request.remove ?? [])).map((file) =>
 		relative(repo, resolve(repo, file)),
 	);
 
-	if (files.length === 0 && removals.length === 0) {
+	if (!request.probe && files.length === 0 && removals.length === 0) {
 		throw new Error(
 			autoSelected
 				? `Nothing differs from origin/${base} — no local commits, edits or new files to ship`
@@ -224,12 +229,14 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 		// whole call fail (the path is gone), which would silently stage nothing.
 		if (files.length > 0) git(["add", "--", ...files], { cwd: worktree });
 
-		if (git(["diff", "--cached", "--quiet"], { cwd: worktree, allowFailure: true }) !== undefined) {
+		if (!request.probe && git(["diff", "--cached", "--quiet"], { cwd: worktree, allowFailure: true }) !== undefined) {
 			throw new Error(`Those files are already identical to origin/${base} — nothing to ship`);
 		}
 
 		const message = request.body?.trim() ? `${commitSubject}\n\n${request.body.trim()}\n` : `${commitSubject}\n`;
-		git(["commit", "--quiet", "-F", "-"], { cwd: worktree, input: message });
+		const commitArgs = ["commit", "--quiet", "-F", "-"];
+		if (request.probe) commitArgs.push("--allow-empty");
+		git(commitArgs, { cwd: worktree, input: message });
 		onProgress?.(`committed ${files.length} file(s) as ${commitSubject}`);
 
 		let prUrl: string | undefined;

@@ -7,7 +7,8 @@
   "license": "MIT",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "ship:debug": "node scripts/ship-debug.ts"
+    "ship:debug": "node scripts/ship-debug.ts",
+    "ship:debug:live": "node scripts/ship-debug.ts live"
   },
   "pi": {
     "extensions": [
