@@ -15,6 +15,7 @@ worktree, so the current branch, index, uncommitted changes and stashes are neve
 | "commit this", "just commit" | Run the ship workflow with `commitOnly: true` |
 | "draft PR", "WIP PR", "not ready for review" | Run the ship workflow with `draft: true` |
 | "add the notes to the PR", "update the description" | Edit the PR with `gh pr edit` — never re-ship |
+| "I'll do it myself", "give me the command" | Tell them `/ship [project] TICKET fix\|feat "title"` |
 </request-routing>
 
 <required-inputs>

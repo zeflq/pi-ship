@@ -58,12 +58,27 @@ pi -e ~/projects/pi-ship/extensions/ship
 }
 ```
 
-`/ship` prints the resolved configuration.
+`/ship config` prints the resolved configuration.
 
-## Use
+## Two ways to run it
 
-Ask in plain language: *"raise a PR on project-front for PROJECT_A-412, fix, the double-review
-bug"*. The `ship` tool takes:
+**`/ship` — the deterministic path.** No LLM turn, no tokens, nothing invented. With a TUI it
+prompts for project, ticket, type and title, shows the file set it detected, and asks before
+creating anything — so declining costs nothing. Arguments skip whichever prompts they answer:
+
+```
+/ship                                                   → prompt for everything
+/ship PROJECT_A-412 fix "prevent double review"         → straight to the confirmation
+/ship project-back PROJECT_A-412 feat "add export"      → project named explicitly
+/ship config                                            → show the resolved config
+```
+
+Order does not matter: the project name, `fix`/`feat` and the ticket are recognised wherever they
+appear, and an unquoted trailing phrase is taken as the title. In print mode (`pi -p`) there are no
+dialogs, so every part must be on the line.
+
+**The `ship` tool — the conversational path.** Ask in plain language: *"raise a PR on project-front for PROJECT_A-412, fix, the double-review
+bug"* and the model fills the parameters from what it just changed. It takes:
 
 | Parameter | Required | Notes |
 | --- | --- | --- |
@@ -83,6 +98,14 @@ ticket.
 
 It refuses to ship git-ignored paths, files outside the repo, files already identical to the base,
 and malformed ticket ids.
+
+## Preflight
+
+Before creating anything, ship resolves the GitHub remote and refuses early when the repo is
+archived or read-only — a push-time 403 arrives after the commit exists and says only `403`, which
+cannot distinguish an archived repo from missing write access. A common cause of the latter: git
+using different credentials than `gh`, which `gh auth setup-git` fixes. Non-GitHub remotes skip the
+check.
 
 ## Guardrails
 

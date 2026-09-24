@@ -117,6 +117,14 @@ export function collectChanges(cwd: string, base: string): CollectedChanges {
 	return { files: [...files].sort(), removed: [...removed].sort() };
 }
 
+/** The owner/repo of `origin`, when it is a GitHub remote. */
+export function originSlug(cwd: string): string | undefined {
+	const url = git(["remote", "get-url", "origin"], { cwd, allowFailure: true });
+	if (!url) return undefined;
+	const match = url.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+	return match?.[1];
+}
+
 /** Paths git would ignore; committing these is nearly always a mistake. */
 export function ignoredPaths(cwd: string, paths: string[]): string[] {
 	if (paths.length === 0) return [];

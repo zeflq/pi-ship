@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { loadConfig, resolveProject } from "./config.ts";
-import { collectChanges, diffSnapshots, git, ignoredPaths, nextBranchName, snapshot } from "./git.ts";
+import { collectChanges, diffSnapshots, git, ignoredPaths, nextBranchName, originSlug, snapshot } from "./git.ts";
 
 export const TICKET_PATTERN = /^[A-Z][A-Z0-9_]*-\d+$/;
 
@@ -84,6 +84,39 @@ function gh(args: string[], cwd: string): string {
 	}
 }
 
+/**
+ * Push access, checked before any work happens. A 403 at push time arrives
+ * after the commit exists and says only "403" — an archived repo and read-only
+ * access are indistinguishable there, and both are common when shipping from a
+ * machine whose git credentials differ from its gh login.
+ */
+function assertPushable(repo: string): void {
+	const slug = originSlug(repo);
+	if (!slug) return; // not a GitHub remote — let git speak for itself
+
+	let json: string;
+	try {
+		json = execFileSync("gh", ["repo", "view", slug, "--json", "isArchived,viewerPermission"], {
+			cwd: repo,
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+	} catch {
+		return; // gh missing or offline: not worth blocking on
+	}
+
+	const info = JSON.parse(json) as { isArchived?: boolean; viewerPermission?: string };
+	if (info.isArchived) {
+		throw new Error(`${slug} is archived on GitHub, so it is read-only. Unarchive it in Settings before shipping.`);
+	}
+	if (info.viewerPermission === "READ" || info.viewerPermission === "NONE") {
+		throw new Error(
+			`No write access to ${slug} (permission: ${info.viewerPermission}). ` +
+				"Check `gh auth status` — git may be using different credentials than gh; `gh auth setup-git` fixes that.",
+		);
+	}
+}
+
 export function ship(request: ShipRequest, onProgress?: (message: string) => void): ShipResult {
 	assertValid(request);
 
@@ -94,6 +127,8 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 
 	// Anything that differs afterwards means we disturbed the dev's work.
 	const before = snapshot(repo);
+
+	if (!request.commitOnly) assertPushable(repo);
 
 	onProgress?.(`fetching origin/${base}`);
 	git(["fetch", "origin", base], { cwd: repo });

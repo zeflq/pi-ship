@@ -8,6 +8,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
+import { runShipCommand } from "./command.ts";
 import { CONFIG_PATH, loadConfig } from "./config.ts";
 import { ship, type ShipRequest } from "./ship.ts";
 
@@ -63,22 +64,18 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("ship", {
-		description: "Show ship configuration and how to use it",
-		handler: async (_args, ctx) => {
+		description: 'Branch, commit and open a PR — /ship [project] TICKET-123 fix|feat "title", or /ship config',
+		getArgumentCompletions: (prefix: string) => {
+			let names: string[];
 			try {
-				const config = loadConfig();
-				const projects = Object.entries(config.projects)
-					.map(([name, path]) => `  ${name} → ${path}`)
-					.join("\n");
-				ctx.ui.notify(
-					`ship: base origin/${config.base}\n${projects}\n\n` +
-						'Ask for what you want, e.g. "ship the reviewer fix to project-front as PROJECT_A-412".',
-					"info",
-				);
-			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+				names = [...Object.keys(loadConfig().projects), "config"];
+			} catch {
+				return null;
 			}
+			const items = names.filter((name) => name.startsWith(prefix)).map((name) => ({ value: name, label: name }));
+			return items.length > 0 ? items : null;
 		},
+		handler: runShipCommand,
 	});
 
 	// A ship is only safe because the checkout is read-only. Committing or
