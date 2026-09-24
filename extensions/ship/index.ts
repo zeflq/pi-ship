@@ -9,6 +9,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { runShipCommand } from "./command.ts";
+import { shipDebug } from "./debug.ts";
 import { CONFIG_PATH, loadConfig } from "./config.ts";
 import { ship, type ShipRequest } from "./ship.ts";
 
@@ -76,6 +77,14 @@ export default function (pi: ExtensionAPI) {
 			return items.length > 0 ? items : null;
 		},
 		handler: runShipCommand,
+	});
+
+	pi.registerCommand("ship-debug", {
+		description: "Dry-run ship with fake ticket DEBUG-1234 — reports the plan, changes nothing",
+		handler: async (args, ctx) => {
+			const report = shipDebug(args.trim() || undefined);
+			ctx.ui.notify(report.lines.join("\n"), report.ok ? "info" : "error");
+		},
 	});
 
 	// A ship is only safe because the checkout is read-only. Committing or

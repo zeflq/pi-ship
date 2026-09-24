@@ -27,6 +27,8 @@ export interface ShipRequest {
 	draft?: boolean;
 	/** Stop after the local commit — no push, no PR. */
 	commitOnly?: boolean;
+	/** Report the plan and change nothing: no branch, no commit, no push. */
+	dryRun?: boolean;
 }
 
 export interface ShipResult {
@@ -40,6 +42,8 @@ export interface ShipResult {
 	removed: string[];
 	/** True when the file set was detected rather than supplied. */
 	autoSelected: boolean;
+	/** True when nothing was created — the result is a plan. */
+	dryRun: boolean;
 }
 
 function assertValid(request: ShipRequest): void {
@@ -85,14 +89,27 @@ function gh(args: string[], cwd: string): string {
 }
 
 /**
- * Push access, checked before any work happens. A 403 at push time arrives
- * after the commit exists and says only "403" — an archived repo and read-only
- * access are indistinguishable there, and both are common when shipping from a
- * machine whose git credentials differ from its gh login.
+ * Everything the PR path needs, checked before any work happens: gh present and
+ * authenticated, and the remote writable.
+ *
+ * A push-time 403 arrives after the commit exists and says only "403" — an
+ * archived repo and read-only access are indistinguishable there, and both are
+ * common when shipping from a machine whose git credentials differ from its gh
+ * login. A missing gh is worse: without this check the branch gets pushed and
+ * the run dies at `gh pr create`, leaving a branch with no PR.
  */
-function assertPushable(repo: string): void {
+function assertCanOpenPr(repo: string): void {
+	try {
+		execFileSync("gh", ["--version"], { cwd: repo, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+	} catch {
+		throw new Error(
+			"The GitHub CLI (gh) is required to open the PR: https://cli.github.com — " +
+				"or pass commitOnly to stop after the local commit.",
+		);
+	}
+
 	const slug = originSlug(repo);
-	if (!slug) return; // not a GitHub remote — let git speak for itself
+	if (!slug) return; // not a github.com remote: let gh speak for itself later
 
 	let json: string;
 	try {
@@ -101,8 +118,14 @@ function assertPushable(repo: string): void {
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		});
-	} catch {
-		return; // gh missing or offline: not worth blocking on
+	} catch (error) {
+		// Covers an expired login, no network, and a repo gh cannot see. All of
+		// them would fail the push or the PR, so surface gh's own words now.
+		const stderr = (error as { stderr?: string }).stderr?.trim();
+		throw new Error(
+			`Cannot read ${slug} with gh${stderr ? `: ${stderr}` : ""}. ` +
+				"Check `gh auth status` — git may also be using different credentials than gh, which `gh auth setup-git` fixes.",
+		);
 	}
 
 	const info = JSON.parse(json) as { isArchived?: boolean; viewerPermission?: string };
@@ -117,6 +140,19 @@ function assertPushable(repo: string): void {
 	}
 }
 
+/** The preflight verdict as a line of text, for dry runs. */
+function preflightSummary(repo: string): string {
+	try {
+		assertCanOpenPr(repo);
+		const slug = originSlug(repo);
+		return slug
+			? `preflight ok — gh can write to ${slug}`
+			: "preflight ok — gh present; origin is not a github.com remote, so access was not checked";
+	} catch (error) {
+		return `preflight would FAIL — ${error instanceof Error ? error.message : String(error)}`;
+	}
+}
+
 export function ship(request: ShipRequest, onProgress?: (message: string) => void): ShipResult {
 	assertValid(request);
 
@@ -128,7 +164,8 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 	// Anything that differs afterwards means we disturbed the dev's work.
 	const before = snapshot(repo);
 
-	if (!request.commitOnly) assertPushable(repo);
+	if (!request.commitOnly && !request.dryRun) assertCanOpenPr(repo);
+	else if (request.dryRun) onProgress?.(preflightSummary(repo));
 
 	onProgress?.(`fetching origin/${base}`);
 	git(["fetch", "origin", base], { cwd: repo });
@@ -163,6 +200,11 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 	const branch = nextBranchName(repo, `${request.type}/${request.ticket}`);
 	const commitSubject = `${request.type}(${request.ticket}): ${title}`;
 	const prTitle = `[${request.ticket}] ${request.type}: ${title}`;
+
+	if (request.dryRun) {
+		onProgress?.("dry run — nothing created");
+		return { repo, branch, base, commitSubject, prTitle, shipped: files, removed: removals, autoSelected, dryRun: true };
+	}
 
 	const worktree = mkdtempSync(join(tmpdir(), "pi-ship-"));
 	try {
@@ -212,6 +254,7 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 			shipped: files,
 			removed: removals,
 			autoSelected,
+			dryRun: false,
 		};
 	} finally {
 		// Remove the worktree first, then verify we left the checkout alone —

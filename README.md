@@ -91,6 +91,7 @@ bug"* and the model fills the parameters from what it just changed. It takes:
 | `body` | no | commit body and PR description |
 | `draft` | no | open the PR as a draft |
 | `commitOnly` | no | stop after the local commit — no push, no PR |
+| `dryRun` | no | report the plan and change nothing |
 
 By default the file set is everything that differs from `origin/develop`: local commits, staged and
 unstaged edits, new files and deletions. Work starts on the base branch, so the current work is the
@@ -99,10 +100,40 @@ ticket.
 It refuses to ship git-ignored paths, files outside the repo, files already identical to the base,
 and malformed ticket ids.
 
+## Checking a machine — `/ship-debug`
+
+Run the whole path against fake ticket `DEBUG-1234` and change nothing: no branch, no commit, no
+push. It reports the config it loaded, the preflight verdict, the branch it would create, the exact
+commit subject and PR title, and the file set it detected.
+
+```
+/ship-debug                  # every configured project
+/ship-debug project-front    # just one
+```
+
+Outside pi, for a new machine:
+
+```bash
+npm run ship:debug                       # exits non-zero when something would fail
+PI_SHIP_CONFIG=/tmp/ship.json npm run ship:debug project-front
+```
+
+```
+── project-front ──
+   preflight ok — gh can write to org/project-front
+   selected 4 changed file(s) and 1 deletion(s) vs origin/develop
+   branch:  fix/DEBUG-1234  (from origin/develop)
+   commit:  fix(DEBUG-1234): debug probe — nothing is created
+   PR:      [DEBUG-1234] fix: debug probe — nothing is created
+```
+
+A dry run reports the preflight verdict instead of aborting on it, so one command tells you about
+an archived repo, a credential mismatch and a bad config path together.
+
 ## Preflight
 
 Before creating anything, ship resolves the GitHub remote and refuses early when the repo is
-archived or read-only — a push-time 403 arrives after the commit exists and says only `403`, which
+archived or read-only, and that `gh` itself is present and authenticated — a push-time 403 arrives after the commit exists and says only `403`, which
 cannot distinguish an archived repo from missing write access. A common cause of the latter: git
 using different credentials than `gh`, which `gh auth setup-git` fixes. Non-GitHub remotes skip the
 check.
@@ -124,4 +155,7 @@ the title, what never goes in a PR body.
 | `extensions/ship/ship.ts` | the operation: worktree, copy, commit, push, PR |
 | `extensions/ship/git.ts` | git helpers: snapshots, branch naming, change collection |
 | `extensions/ship/config.ts` | `~/.pi/ship.json` loading and validation |
+| `extensions/ship/command.ts` | `/ship` — interactive and positional forms |
+| `extensions/ship/debug.ts` | `/ship-debug` — the dry run |
+| `scripts/ship-debug.ts` | the same dry run, outside pi |
 | `skills/shipping/SKILL.md` | conventions for the model |

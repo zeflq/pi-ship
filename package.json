@@ -6,11 +6,16 @@
   "description": "pi extension: raise a PR from a ticket id without touching your working checkout",
   "license": "MIT",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "ship:debug": "node scripts/ship-debug.ts"
   },
   "pi": {
-    "extensions": ["./extensions"],
-    "skills": ["./skills"]
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ]
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.85.1",
