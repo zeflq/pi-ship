@@ -27,13 +27,6 @@ export interface ShipRequest {
 	draft?: boolean;
 	/** Stop after the local commit — no push, no PR. */
 	commitOnly?: boolean;
-	/** Report the plan and change nothing: no branch, no commit, no push. */
-	dryRun?: boolean;
-	/**
-	 * Debug only: commit nothing (an empty commit) and ignore the change set, so
-	 * the push and PR machinery can be exercised without shipping real work.
-	 */
-	probe?: boolean;
 }
 
 export interface ShipResult {
@@ -47,8 +40,6 @@ export interface ShipResult {
 	removed: string[];
 	/** True when the file set was detected rather than supplied. */
 	autoSelected: boolean;
-	/** True when nothing was created — the result is a plan. */
-	dryRun: boolean;
 }
 
 function assertValid(request: ShipRequest): void {
@@ -145,19 +136,6 @@ function assertCanOpenPr(repo: string): void {
 	}
 }
 
-/** The preflight verdict as a line of text, for dry runs. */
-function preflightSummary(repo: string): string {
-	try {
-		assertCanOpenPr(repo);
-		const slug = originSlug(repo);
-		return slug
-			? `preflight ok — gh can write to ${slug}`
-			: "preflight ok — gh present; origin is not a github.com remote, so access was not checked";
-	} catch (error) {
-		return `preflight would FAIL — ${error instanceof Error ? error.message : String(error)}`;
-	}
-}
-
 export function ship(request: ShipRequest, onProgress?: (message: string) => void): ShipResult {
 	assertValid(request);
 
@@ -169,8 +147,7 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 	// Anything that differs afterwards means we disturbed the dev's work.
 	const before = snapshot(repo);
 
-	if (!request.commitOnly && !request.dryRun) assertCanOpenPr(repo);
-	else if (request.dryRun) onProgress?.(preflightSummary(repo));
+	if (!request.commitOnly) assertCanOpenPr(repo);
 
 	onProgress?.(`fetching origin/${base}`);
 	git(["fetch", "origin", base], { cwd: repo });
@@ -181,14 +158,14 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 	// Work starts on the base branch, so by default everything that differs from
 	// it is the ticket. An explicit list narrows that when a session mixed two
 	// pieces of work.
-	const autoSelected = !request.probe && request.files === undefined && request.remove === undefined;
+	const autoSelected = request.files === undefined && request.remove === undefined;
 	const detected = autoSelected ? collectChanges(repo, base) : undefined;
 	const files = normalizeFiles(repo, detected ? detected.files : (request.files ?? []));
 	const removals = (detected ? detected.removed : (request.remove ?? [])).map((file) =>
 		relative(repo, resolve(repo, file)),
 	);
 
-	if (!request.probe && files.length === 0 && removals.length === 0) {
+	if (files.length === 0 && removals.length === 0) {
 		throw new Error(
 			autoSelected
 				? `Nothing differs from origin/${base} — no local commits, edits or new files to ship`
@@ -205,11 +182,6 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 	const branch = nextBranchName(repo, `${request.type}/${request.ticket}`);
 	const commitSubject = `${request.type}(${request.ticket}): ${title}`;
 	const prTitle = `[${request.ticket}] ${request.type}: ${title}`;
-
-	if (request.dryRun) {
-		onProgress?.("dry run — nothing created");
-		return { repo, branch, base, commitSubject, prTitle, shipped: files, removed: removals, autoSelected, dryRun: true };
-	}
 
 	const worktree = mkdtempSync(join(tmpdir(), "pi-ship-"));
 	try {
@@ -229,14 +201,12 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 		// whole call fail (the path is gone), which would silently stage nothing.
 		if (files.length > 0) git(["add", "--", ...files], { cwd: worktree });
 
-		if (!request.probe && git(["diff", "--cached", "--quiet"], { cwd: worktree, allowFailure: true }) !== undefined) {
+		if (git(["diff", "--cached", "--quiet"], { cwd: worktree, allowFailure: true }) !== undefined) {
 			throw new Error(`Those files are already identical to origin/${base} — nothing to ship`);
 		}
 
 		const message = request.body?.trim() ? `${commitSubject}\n\n${request.body.trim()}\n` : `${commitSubject}\n`;
-		const commitArgs = ["commit", "--quiet", "-F", "-"];
-		if (request.probe) commitArgs.push("--allow-empty");
-		git(commitArgs, { cwd: worktree, input: message });
+		git(["commit", "--quiet", "-F", "-"], { cwd: worktree, input: message });
 		onProgress?.(`committed ${files.length} file(s) as ${commitSubject}`);
 
 		let prUrl: string | undefined;
@@ -261,7 +231,6 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 			shipped: files,
 			removed: removals,
 			autoSelected,
-			dryRun: false,
 		};
 	} finally {
 		// Remove the worktree first, then verify we left the checkout alone —

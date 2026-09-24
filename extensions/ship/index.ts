@@ -9,7 +9,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { runShipCommand } from "./command.ts";
-import { shipDebug, shipDebugLive } from "./debug.ts";
 import { CONFIG_PATH, loadConfig } from "./config.ts";
 import { ship, type ShipRequest } from "./ship.ts";
 
@@ -77,18 +76,6 @@ export default function (pi: ExtensionAPI) {
 			return items.length > 0 ? items : null;
 		},
 		handler: runShipCommand,
-	});
-
-	pi.registerCommand("ship-debug", {
-		description: "Test ship without an LLM turn — dry by default, `live` pushes an empty probe PR and closes it",
-		handler: async (args, ctx) => {
-			const words = args.trim().split(/\s+/).filter(Boolean);
-			const live = words.includes("live");
-			const keep = words.includes("--keep");
-			const project = words.find((word) => word !== "live" && word !== "--keep");
-			const report = live ? shipDebugLive(project, { keep }) : shipDebug(project);
-			ctx.ui.notify(report.lines.join("\n"), report.ok ? "info" : "error");
-		},
 	});
 
 	// A ship is only safe because the checkout is read-only. Committing or

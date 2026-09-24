@@ -91,7 +91,6 @@ bug"* and the model fills the parameters from what it just changed. It takes:
 | `body` | no | commit body and PR description |
 | `draft` | no | open the PR as a draft |
 | `commitOnly` | no | stop after the local commit — no push, no PR |
-| `dryRun` | no | report the plan and change nothing |
 
 By default the file set is everything that differs from `origin/develop`: local commits, staged and
 unstaged edits, new files and deletions. Work starts on the base branch, so the current work is the
@@ -100,62 +99,32 @@ ticket.
 It refuses to ship git-ignored paths, files outside the repo, files already identical to the base,
 and malformed ticket ids.
 
-## Checking a machine — `/ship-debug`
+## Debugging push / PR problems
 
-Run the whole path against fake ticket `DEBUG-1234` and change nothing: no branch, no commit, no
-push. It reports the config it loaded, the preflight verdict, the branch it would create, the exact
-commit subject and PR title, and the file set it detected.
-
-```
-/ship-debug                  # every configured project
-/ship-debug project-front    # just one
-```
-
-Outside pi, for a new machine:
+`scripts/ship-debug.ts` is a **temporary standalone probe**, deliberately not wired into the
+extension: it registers no command or tool, imports nothing from `extensions/`, and can be deleted
+without touching anything else. Run it with node directly:
 
 ```bash
-npm run ship:debug                       # exits non-zero when something would fail
-PI_SHIP_CONFIG=/tmp/ship.json npm run ship:debug project-front
+node scripts/ship-debug.ts ~/projects/projectFront          # base defaults to develop
+node scripts/ship-debug.ts ~/projects/projectFront main
+node scripts/ship-debug.ts . develop --keep                 # leave the probe PR open
 ```
 
-```
-── project-front ──
-   preflight ok — gh can write to org/project-front
-   selected 4 changed file(s) and 1 deletion(s) vs origin/develop
-   branch:  fix/DEBUG-1234  (from origin/develop)
-   commit:  fix(DEBUG-1234): debug probe — nothing is created
-   PR:      [DEBUG-1234] fix: debug probe — nothing is created
-```
-
-A dry run reports the preflight verdict instead of aborting on it, so one command tells you about
-an archived repo, a credential mismatch and a bad config path together.
-
-### Testing gh for real — `live`
-
-A dry run never calls `git push` or `gh pr create`, so it cannot prove the part that actually
-fails: credentials. `live` pushes a branch with an **empty** commit, opens a draft PR, then closes
-the PR and deletes the branch again — no LLM turn, no real work shipped:
+It reports `gh --version`, `gh auth status`, git's credential helper, the origin URL and the repo's
+`isArchived` / `viewerPermission`, then pushes a branch carrying an **empty** commit, opens a draft
+PR, and closes it again — so it exercises the two things that actually fail, with fake ticket
+`DEBUG-1234`, no real work and no LLM turn. Exit code is non-zero when any step fails.
 
 ```
-/ship-debug live project-front           # probe and clean up
-/ship-debug live project-front --keep    # leave the PR open to inspect
+✓ repo access
+    {"isArchived":true,"viewerPermission":"ADMIN"}
+✗ git push  ← a 403 appears here
+    remote: This repository was archived so it is read-only.
+✓ checkout untouched
 ```
 
-```
-── project-front — live probe ──
-   creating fix/DEBUG-1234 from origin/develop
-   committed 0 file(s) as fix(DEBUG-1234): ship debug probe
-   pushing fix/DEBUG-1234
-   opened https://github.com/org/project-front/pull/57
-   ✓ push and gh pr create both work
-   ✓ closed the PR and deleted origin/fix/DEBUG-1234
-```
-
-It leaves a closed PR in the repo's history — that is the cost of testing the real path. Cleanup is
-reported separately from the probe, so a probe that worked with a cleanup that did not never reads
-as a clean pass.
-
-## Preflight
+## Preflight## Preflight
 
 Before creating anything, ship resolves the GitHub remote and refuses early when the repo is
 archived or read-only, and that `gh` itself is present and authenticated — a push-time 403 arrives after the commit exists and says only `403`, which
@@ -181,6 +150,5 @@ the title, what never goes in a PR body.
 | `extensions/ship/git.ts` | git helpers: snapshots, branch naming, change collection |
 | `extensions/ship/config.ts` | `~/.pi/ship.json` loading and validation |
 | `extensions/ship/command.ts` | `/ship` — interactive and positional forms |
-| `extensions/ship/debug.ts` | `/ship-debug` — the dry run |
-| `scripts/ship-debug.ts` | the same dry run, outside pi |
+| `scripts/ship-debug.ts` | temporary standalone push/PR probe — delete when done |
 | `skills/shipping/SKILL.md` | conventions for the model |

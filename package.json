@@ -6,9 +6,7 @@
   "description": "pi extension: raise a PR from a ticket id without touching your working checkout",
   "license": "MIT",
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "ship:debug": "node scripts/ship-debug.ts",
-    "ship:debug:live": "node scripts/ship-debug.ts live"
+    "typecheck": "tsc --noEmit"
   },
   "pi": {
     "extensions": [
