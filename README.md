@@ -63,7 +63,7 @@ config works on any machine the workspace is mounted on:
 ```
 workspace/
   .pi/ship.json
-  .pi/worktrees/          created by ship, removed after each run
+  .pi/worktrees/          created per run, removed again — including the directory itself
   project-front/
   project-back/
 ```
@@ -144,7 +144,8 @@ run locally against whatever credentials that side has, and a 403 no local `gh a
 Three properties keep it on one host:
 
 - the worktree lives at `<root>/.pi/worktrees/ship-<id>`, inside the workspace, not in the system
-  temp dir;
+  temp dir, and is deleted when the run ends — success or failure — along with the now-empty
+  `worktrees/` directory, so the workspace is left exactly as it was;
 - **git** creates it, not `fs.mkdtempSync` — the fs patch does not cover `mkdtemp`, so that call
   would create the directory on the local machine;
 - it is named to git by a path **relative to the repo** with forward slashes, because only *cwd* is

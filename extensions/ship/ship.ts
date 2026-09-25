@@ -6,7 +6,7 @@
 
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { loadConfig, resolveProject } from "./config.ts";
@@ -192,6 +192,30 @@ function worktreeLocation(root: string, repo: string): { path: string; relativeT
 	return { path, relativeToRepo: relative(repo, path).split(sep).join("/") };
 }
 
+/**
+ * Delete the worktree and leave no trace of it: git first, a direct remove if
+ * git could not (a failed run mid-creation, a locked file), then the parent
+ * `worktrees/` directory once it is empty, so the workspace looks untouched.
+ */
+function removeWorktree(repo: string, worktree: string, worktreeArg: string): void {
+	git(["worktree", "remove", "--force", worktreeArg], { cwd: repo, allowFailure: true });
+	git(["worktree", "prune"], { cwd: repo, allowFailure: true });
+
+	// fs.rmSync is bridge-aware (unlike mkdtemp), so this reaches the same host.
+	try {
+		if (existsSync(worktree)) rmSync(worktree, { recursive: true, force: true });
+	} catch {
+		// Reported below rather than thrown: the ship itself may have succeeded.
+	}
+
+	try {
+		const parent = dirname(worktree);
+		if (existsSync(parent) && readdirSync(parent).length === 0) rmSync(parent, { recursive: true, force: true });
+	} catch {
+		// An empty directory left behind is not worth failing a ship over.
+	}
+}
+
 export function ship(request: ShipRequest, onProgress?: (message: string) => void): ShipResult {
 	assertValid(request);
 
@@ -308,10 +332,13 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 			autoSelected,
 		};
 	} finally {
-		// Remove the worktree first, then verify we left the checkout alone —
-		// a mismatch here is a bug worth shouting about.
-		git(["worktree", "remove", "--force", worktreeArg], { cwd: repo, allowFailure: true });
-		git(["worktree", "prune"], { cwd: repo, allowFailure: true });
+		// Remove the worktree, then verify we left the checkout alone — a
+		// mismatch here is a bug worth shouting about.
+		removeWorktree(repo, worktree, worktreeArg);
+
+		if (existsSync(worktree)) {
+			onProgress?.(`could not remove ${worktree} — delete it by hand`);
+		}
 
 		const changes = diffSnapshots(before, snapshot(repo));
 		if (changes.length > 0) {
