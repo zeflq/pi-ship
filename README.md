@@ -124,7 +124,24 @@ PR, and closes it again — so it exercises the two things that actually fail, w
 ✓ checkout untouched
 ```
 
-## Preflight## Auth
+## Preflight## Running under an agent bridge (pi-bridge / SSH workspaces)
+
+`pii` preloads a patch that rewrites `child_process` so a command runs **over SSH on the remote
+host** when its cwd falls inside the bridged project tree. That makes the location of ship's
+worktree load-bearing: a worktree in the system temp dir sits outside that tree, so the commit and
+push would execute on the local machine while the branch was created remotely — two machines, two
+sets of credentials, and a 403 that no amount of local `gh auth` can explain.
+
+The worktree therefore lives in `<repo>/.git/pi-ship-*`, inside the project tree, so every command
+runs on the same side. Git ignores everything under `.git`, so it never appears in `git status` or
+the untracked scan. (If `.git` is a file — a submodule or linked worktree — it falls back to the
+temp dir.)
+
+One consequence worth knowing: on a bridged setup, the machine that needs a working `gh` and push
+credentials is the **remote** one, not your laptop. SSH runs with `BatchMode=yes` and forwards no
+environment, so a `GH_TOKEN` in your shell never reaches it.
+
+## Auth
 
 The push runs with git's credential helper pinned to gh:
 

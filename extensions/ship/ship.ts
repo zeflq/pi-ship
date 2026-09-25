@@ -172,6 +172,27 @@ function assertTokenCanWrite(repo: string, slug: string): void {
 	);
 }
 
+/**
+ * Where the throwaway worktree lives: inside the repo's own .git, not the
+ * system temp dir.
+ *
+ * Under an agent bridge such as pi-bridge, child_process is patched to run a
+ * command over SSH when its cwd falls inside the bridged project tree. A temp
+ * worktree outside that tree therefore executes on a different machine than the
+ * repo commands — the branch is created remotely while the commit and push run
+ * locally, against whatever credentials that side happens to have. Keeping the
+ * worktree under .git keeps every command on one side, and git ignores
+ * everything in there, so it never shows up in status or the untracked scan.
+ */
+function createWorktreeDir(repo: string): string {
+	try {
+		return mkdtempSync(join(repo, ".git", "pi-ship-"));
+	} catch {
+		// .git is a file (submodule or linked worktree), or is not writable.
+		return mkdtempSync(join(tmpdir(), "pi-ship-"));
+	}
+}
+
 export function ship(request: ShipRequest, onProgress?: (message: string) => void): ShipResult {
 	assertValid(request);
 
@@ -219,7 +240,7 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 	const commitSubject = `${request.type}(${request.ticket}): ${title}`;
 	const prTitle = `[${request.ticket}] ${request.type}: ${title}`;
 
-	const worktree = mkdtempSync(join(tmpdir(), "pi-ship-"));
+	const worktree = createWorktreeDir(repo);
 	try {
 		onProgress?.(`creating ${branch} from origin/${base}`);
 		git(["worktree", "add", "--quiet", worktree, "-b", branch, `origin/${base}`], { cwd: repo });
