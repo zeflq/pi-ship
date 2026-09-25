@@ -124,10 +124,26 @@ PR, and closes it again — so it exercises the two things that actually fail, w
 ✓ checkout untouched
 ```
 
-## Preflight## Preflight
+## Preflight## Auth
 
-Before creating anything, ship resolves the GitHub remote and refuses early when the repo is
-archived or read-only, and that `gh` itself is present and authenticated — a push-time 403 arrives after the commit exists and says only `403`, which
+The push runs with git's credential helper pinned to gh:
+
+```
+git -c credential.helper= -c credential.helper='!gh auth git-credential' push …
+```
+
+The empty first value clears whatever the environment inherited — Git Credential Manager, a
+keychain helper, one from a different `HOME` — and the second makes git ask the same gh that the
+preflight just queried. Without it, gh and git can hold different identities, and a repo gh reports
+as writable still fails the push with a bare 403. That is the "works in my shell, fails in the
+tool" case, and it is common when ship runs inside an agent runtime rather than your terminal.
+
+## Preflight
+
+Before creating anything, ship checks that `gh` is present and authenticated, that its token can
+actually write (`X-OAuth-Scopes` must include `repo` — `gh repo view` cannot tell you this, since
+`viewerPermission` describes your account's role on the repo, so a read-only token reports `ADMIN`
+and still 403s), and that the repo is neither archived nor read-only — a push-time 403 arrives after the commit exists and says only `403`, which
 cannot distinguish an archived repo from missing write access. A common cause of the latter: git
 using different credentials than `gh`, which `gh auth setup-git` fixes. Non-GitHub remotes skip the
 check.

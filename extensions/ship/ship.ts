@@ -124,6 +124,8 @@ function assertCanOpenPr(repo: string): void {
 		);
 	}
 
+	assertTokenCanWrite(repo, slug);
+
 	const info = JSON.parse(json) as { isArchived?: boolean; viewerPermission?: string };
 	if (info.isArchived) {
 		throw new Error(`${slug} is archived on GitHub, so it is read-only. Unarchive it in Settings before shipping.`);
@@ -134,6 +136,40 @@ function assertCanOpenPr(repo: string): void {
 				"Check `gh auth status` — git may be using different credentials than gh; `gh auth setup-git` fixes that.",
 		);
 	}
+}
+
+/**
+ * Whether gh's token may write, which `gh repo view` cannot tell us:
+ * viewerPermission describes the account's role on the repo, so a read-only
+ * token reports ADMIN and still fails the push with a bare 403.
+ */
+function assertTokenCanWrite(repo: string, slug: string): void {
+	let headers: string;
+	try {
+		headers = execFileSync("gh", ["api", "-i", "user"], {
+			cwd: repo,
+			encoding: "utf-8",
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+	} catch {
+		return; // offline or an odd host: the push failure will speak for itself
+	}
+
+	const match = headers.match(/^x-oauth-scopes:\s*(.*)$/im);
+	if (!match) return; // fine-grained tokens and GitHub Apps send no scope header
+	const scopes = match[1]
+		.split(",")
+		.map((scope) => scope.trim())
+		.filter(Boolean);
+	if (scopes.length === 0 || scopes.includes("repo") || scopes.includes("public_repo")) return;
+
+	const fromEnv = process.env.GH_TOKEN ? "GH_TOKEN" : process.env.GITHUB_TOKEN ? "GITHUB_TOKEN" : undefined;
+	throw new Error(
+		`The GitHub token in use cannot write to ${slug} — scopes: ${scopes.join(", ")} (needs "repo"). ` +
+			(fromEnv
+				? `It comes from ${fromEnv} in this process, which gh prefers over its stored login. Unset it, or replace it with a token that has repo scope.`
+				: "Run `gh auth refresh -s repo`, or log in with a token that has repo scope."),
+	);
 }
 
 export function ship(request: ShipRequest, onProgress?: (message: string) => void): ShipResult {
@@ -212,7 +248,24 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 		let prUrl: string | undefined;
 		if (!request.commitOnly) {
 			onProgress?.(`pushing ${branch}`);
-			git(["push", "--quiet", "-u", "origin", branch], { cwd: worktree });
+			// Clear any inherited helper (GCM, osxkeychain, one from a different
+			// HOME) and force git to ask gh. Without this, gh and git can hold
+			// different identities and a repo gh reports as writable still 403s
+			// on push — the "works in my shell" failure.
+			git(
+				[
+					"-c",
+					"credential.helper=",
+					"-c",
+					"credential.helper=!gh auth git-credential",
+					"push",
+					"--quiet",
+					"-u",
+					"origin",
+					branch,
+				],
+				{ cwd: worktree },
+			);
 
 			const prBody = request.body?.trim() || `Ticket: ${request.ticket}`;
 			const args = ["pr", "create", "--base", base, "--head", branch, "--title", prTitle, "--body", prBody];
