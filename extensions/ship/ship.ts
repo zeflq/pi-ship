@@ -54,11 +54,24 @@ function assertValid(request: ShipRequest): void {
 	if (title.length > 72) throw new Error(`Title is ${title.length} chars; keep it under 72`);
 }
 
+/**
+ * Repo-relative path in the form git wants: forward slashes, always.
+ *
+ * path.relative() yields backslashes on Windows, and under a bridge those
+ * pathspecs are handed to git on a Linux host, where "\" is an ordinary
+ * character — `git add .github\workflows\x.yml` then matches nothing.
+ */
+function toGitPath(repo: string, file: string): string {
+	return relative(repo, isAbsolute(file) ? file : resolve(repo, file))
+		.split(sep)
+		.join("/");
+}
+
 /** Repo-relative, inside the repo, present on disk, not ignored. */
 function normalizeFiles(repo: string, files: string[]): string[] {
 	const normalized = files.map((file) => {
 		const absolute = isAbsolute(file) ? file : resolve(repo, file);
-		const rel = relative(repo, absolute);
+		const rel = toGitPath(repo, absolute);
 		if (rel.startsWith("..")) throw new Error(`"${file}" is outside ${repo}`);
 		if (!existsSync(absolute)) throw new Error(`"${rel}" does not exist in the working tree`);
 		if (statSync(absolute).isDirectory()) throw new Error(`"${rel}" is a directory — list the files instead`);
@@ -189,7 +202,7 @@ function worktreeLocation(root: string, repo: string): { path: string; relativeT
 	const path = join(root, ".pi", "worktrees", `ship-${randomBytes(4).toString("hex")}`);
 	// Forward slashes work for git on every platform; backslashes do not survive
 	// the trip to a Linux host.
-	return { path, relativeToRepo: relative(repo, path).split(sep).join("/") };
+	return { path, relativeToRepo: toGitPath(repo, path) };
 }
 
 /**
@@ -241,9 +254,7 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 	const autoSelected = request.files === undefined && request.remove === undefined;
 	const detected = autoSelected ? collectChanges(repo, base) : undefined;
 	const files = normalizeFiles(repo, detected ? detected.files : (request.files ?? []));
-	const removals = (detected ? detected.removed : (request.remove ?? [])).map((file) =>
-		relative(repo, resolve(repo, file)),
-	);
+	const removals = (detected ? detected.removed : (request.remove ?? [])).map((file) => toGitPath(repo, file));
 
 	if (files.length === 0 && removals.length === 0) {
 		throw new Error(

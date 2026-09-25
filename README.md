@@ -148,9 +148,10 @@ Three properties keep it on one host:
   `worktrees/` directory, so the workspace is left exactly as it was;
 - **git** creates it, not `fs.mkdtempSync` — the fs patch does not cover `mkdtemp`, so that call
   would create the directory on the local machine;
-- it is named to git by a path **relative to the repo** with forward slashes, because only *cwd* is
-  translated to a remote path — arguments are passed verbatim, so an absolute Windows path means
-  nothing on a Linux host.
+- **every** path handed to git — the worktree, each file, each deletion — is repo-relative with
+  forward slashes, because only *cwd* is translated to a remote path. Arguments are passed
+  verbatim, so an absolute Windows path means nothing on a Linux host, and `path.relative()`
+  backslashes turn a pathspec such as `.github\workflows\x.yml` into a name that matches no file.
 
 On a bridged setup the machine that needs a working `gh` and push credentials is the **remote** one.
 SSH runs with `BatchMode=yes` and forwards no environment, so a `GH_TOKEN` in your shell never
