@@ -4,10 +4,10 @@
  * developer's checkout.
  */
 
+import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { loadConfig, resolveProject } from "./config.ts";
 import { collectChanges, diffSnapshots, git, ignoredPaths, nextBranchName, originSlug, snapshot } from "./git.ts";
@@ -173,24 +173,23 @@ function assertTokenCanWrite(repo: string, slug: string): void {
 }
 
 /**
- * Where the throwaway worktree lives: inside the repo's own .git, not the
- * system temp dir.
+ * Where the throwaway worktree lives: `<root>/.pi/worktrees/ship-<id>`, beside
+ * the config, inside the workspace.
  *
  * Under an agent bridge such as pi-bridge, child_process is patched to run a
- * command over SSH when its cwd falls inside the bridged project tree. A temp
- * worktree outside that tree therefore executes on a different machine than the
- * repo commands — the branch is created remotely while the commit and push run
- * locally, against whatever credentials that side happens to have. Keeping the
- * worktree under .git keeps every command on one side, and git ignores
- * everything in there, so it never shows up in status or the untracked scan.
+ * command over SSH when its cwd is inside the bridged workspace — and fs is
+ * patched the same way, but `mkdtempSync` is not among the patched calls, and
+ * only *cwd* is translated to a remote path, never arguments. So the worktree
+ * must (a) live inside the workspace, or half the commands run on the other
+ * machine, (b) be created by git rather than fs, and (c) be named to git by a
+ * path relative to the repo, since an absolute local path means nothing on the
+ * remote host.
  */
-function createWorktreeDir(repo: string): string {
-	try {
-		return mkdtempSync(join(repo, ".git", "pi-ship-"));
-	} catch {
-		// .git is a file (submodule or linked worktree), or is not writable.
-		return mkdtempSync(join(tmpdir(), "pi-ship-"));
-	}
+function worktreeLocation(root: string, repo: string): { path: string; relativeToRepo: string } {
+	const path = join(root, ".pi", "worktrees", `ship-${randomBytes(4).toString("hex")}`);
+	// Forward slashes work for git on every platform; backslashes do not survive
+	// the trip to a Linux host.
+	return { path, relativeToRepo: relative(repo, path).split(sep).join("/") };
 }
 
 export function ship(request: ShipRequest, onProgress?: (message: string) => void): ShipResult {
@@ -240,10 +239,12 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 	const commitSubject = `${request.type}(${request.ticket}): ${title}`;
 	const prTitle = `[${request.ticket}] ${request.type}: ${title}`;
 
-	const worktree = createWorktreeDir(repo);
+	const { path: worktree, relativeToRepo: worktreeArg } = worktreeLocation(config.root, repo);
 	try {
 		onProgress?.(`creating ${branch} from origin/${base}`);
-		git(["worktree", "add", "--quiet", worktree, "-b", branch, `origin/${base}`], { cwd: repo });
+		// git creates the directory; fs.mkdtempSync would create it on the wrong
+		// machine under a bridge.
+		git(["worktree", "add", "--quiet", worktreeArg, "-b", branch, `origin/${base}`], { cwd: repo });
 
 		for (const file of files) {
 			const target = join(worktree, file);
@@ -309,8 +310,8 @@ export function ship(request: ShipRequest, onProgress?: (message: string) => voi
 	} finally {
 		// Remove the worktree first, then verify we left the checkout alone —
 		// a mismatch here is a bug worth shouting about.
-		git(["worktree", "remove", "--force", worktree], { cwd: repo, allowFailure: true });
-		rmSync(worktree, { recursive: true, force: true });
+		git(["worktree", "remove", "--force", worktreeArg], { cwd: repo, allowFailure: true });
+		git(["worktree", "prune"], { cwd: repo, allowFailure: true });
 
 		const changes = diffSnapshots(before, snapshot(repo));
 		if (changes.length > 0) {

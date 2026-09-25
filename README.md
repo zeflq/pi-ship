@@ -46,16 +46,26 @@ pi -e ~/projects/pi-ship/extensions/ship
 
 ## Configure
 
-`~/.pi/ship.json` maps project names to local clones (override the path with `PI_SHIP_CONFIG`):
+Config lives in the workspace, at `<root>/.pi/ship.json` — the nearest one walking up from where
+pi runs (override with `PI_SHIP_CONFIG`). Project paths are relative to that root, so the same
+config works on any machine the workspace is mounted on:
 
 ```json
 {
   "projects": {
-    "project-front": "~/projects/projectFront",
-    "project-back":  "~/projects/projectBack"
+    "project-front": "./project-front",
+    "project-back":  "./project-back"
   },
   "base": "develop"
 }
+```
+
+```
+workspace/
+  .pi/ship.json
+  .pi/worktrees/          created by ship, removed after each run
+  project-front/
+  project-back/
 ```
 
 `/ship config` prints the resolved configuration.
@@ -127,19 +137,23 @@ PR, and closes it again — so it exercises the two things that actually fail, w
 ## Preflight## Running under an agent bridge (pi-bridge / SSH workspaces)
 
 `pii` preloads a patch that rewrites `child_process` so a command runs **over SSH on the remote
-host** when its cwd falls inside the bridged project tree. That makes the location of ship's
-worktree load-bearing: a worktree in the system temp dir sits outside that tree, so the commit and
-push would execute on the local machine while the branch was created remotely — two machines, two
-sets of credentials, and a 403 that no amount of local `gh auth` can explain.
+host** when its cwd is inside the bridged workspace. Everything ship does must therefore stay
+inside that workspace, or it splits across two machines — branch created remotely, commit and push
+run locally against whatever credentials that side has, and a 403 no local `gh auth` can explain.
 
-The worktree therefore lives in `<repo>/.git/pi-ship-*`, inside the project tree, so every command
-runs on the same side. Git ignores everything under `.git`, so it never appears in `git status` or
-the untracked scan. (If `.git` is a file — a submodule or linked worktree — it falls back to the
-temp dir.)
+Three properties keep it on one host:
 
-One consequence worth knowing: on a bridged setup, the machine that needs a working `gh` and push
-credentials is the **remote** one, not your laptop. SSH runs with `BatchMode=yes` and forwards no
-environment, so a `GH_TOKEN` in your shell never reaches it.
+- the worktree lives at `<root>/.pi/worktrees/ship-<id>`, inside the workspace, not in the system
+  temp dir;
+- **git** creates it, not `fs.mkdtempSync` — the fs patch does not cover `mkdtemp`, so that call
+  would create the directory on the local machine;
+- it is named to git by a path **relative to the repo** with forward slashes, because only *cwd* is
+  translated to a remote path — arguments are passed verbatim, so an absolute Windows path means
+  nothing on a Linux host.
+
+On a bridged setup the machine that needs a working `gh` and push credentials is the **remote** one.
+SSH runs with `BatchMode=yes` and forwards no environment, so a `GH_TOKEN` in your shell never
+reaches it.
 
 ## Auth
 

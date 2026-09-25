@@ -9,7 +9,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { runShipCommand } from "./command.ts";
-import { CONFIG_PATH, loadConfig } from "./config.ts";
+import { loadConfig } from "./config.ts";
 import { ship, type ShipRequest } from "./ship.ts";
 
 function formatResult(result: ReturnType<typeof ship>): string {
@@ -89,7 +89,7 @@ export default function (pi: ExtensionAPI) {
 		if (/\bgit\s+(commit|switch|checkout\s+-b|branch)\b/.test(command)) {
 			return {
 				block: true,
-				reason: `Use the ship tool to branch and commit — it works in a throwaway worktree and leaves this checkout alone. Config: ${CONFIG_PATH}`,
+				reason: "Use the ship tool to branch and commit — it works in a throwaway worktree and leaves this checkout alone.",
 			};
 		}
 	});

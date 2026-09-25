@@ -19,7 +19,7 @@ worktree, so the current branch, index, uncommitted changes and stashes are neve
 </request-routing>
 
 <required-inputs>
-  <input><name>project</name><meaning>Key from ~/.pi/ship.json naming the repository.</meaning><example>`project-front` · `project-back`</example></input>
+  <input><name>project</name><meaning>Key from the workspace `.pi/ship.json` naming the repository.</meaning><example>`project-front` · `project-back`</example></input>
   <input><name>ticket</name><meaning>Uppercase key, dash, number. Always comes from the user.</meaning><example>`PROJECT_A-412`</example></input>
   <input><name>type</name><meaning>`fix` repairs broken behavior, `feat` adds behavior.</meaning><example>Restoring a 500-ing endpoint → `fix` · adding an export button → `feat`</example></input>
   <input><name>title</name><meaning>Imperative, under 72 chars, no trailing period, no ticket id — ship adds it.</meaning><example>`prevent double review on synchronize` — never `fixed the double review bug`</example></input>
@@ -27,7 +27,7 @@ worktree, so the current branch, index, uncommitted changes and stashes are neve
 
 <missing-input-handling>
 IF the ticket id is absent → ask: *"Which ticket is this for?"* — stop here.
-ELSE IF the project is absent AND ~/.pi/ship.json holds exactly one project → use that project.
+ELSE IF the project is absent AND `.pi/ship.json` holds exactly one project → use that project.
 ELSE IF the project is absent → ask which project — stop here.
 ELSE IF `fix` versus `feat` is not decidable from the change → ask which — stop here.
 ELSE → continue to Preview.

@@ -1,39 +1,65 @@
 /**
- * Ship configuration: ~/.pi/ship.json
+ * Ship configuration: `<root>/.pi/ship.json`, where <root> is the directory pi
+ * was started in (or the nearest ancestor that has one). Config is per
+ * workspace, not per user, so a bridged or cloned workspace carries its own.
  *
  * {
  *   "projects": {
- *     "project-front": "~/projects/projectFront",
- *     "project-back":  "~/projects/projectBack"
+ *     "project-front": "./project-front",
+ *     "project-back":  "./project-back"
  *   },
  *   "base": "develop"
  * }
+ *
+ * Project paths are resolved against <root>, so they stay valid on whichever
+ * machine the workspace is mounted on.
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, parse, resolve } from "node:path";
 
-/** PI_SHIP_CONFIG overrides the location, which is also how the tests point at a fixture. */
-export const CONFIG_PATH = process.env.PI_SHIP_CONFIG?.trim() || join(homedir(), ".pi", "ship.json");
+export const CONFIG_DIR = ".pi";
+export const CONFIG_NAME = "ship.json";
 
 export interface ShipConfig {
+	/** Directory holding `.pi/ship.json` — every project path is relative to it. */
+	root: string;
+	path: string;
 	projects: Record<string, string>;
 	base: string;
 }
 
-function expandHome(path: string): string {
-	if (path === "~") return homedir();
-	if (path.startsWith("~/")) return join(homedir(), path.slice(2));
-	return isAbsolute(path) ? path : resolve(path);
+/** Nearest `<dir>/.pi/ship.json` walking up from `from`. PI_SHIP_CONFIG wins. */
+export function findConfig(from: string = process.cwd()): string | undefined {
+	const override = process.env.PI_SHIP_CONFIG?.trim();
+	if (override) return override;
+
+	let dir = resolve(from);
+	const { root } = parse(dir);
+	while (true) {
+		const candidate = join(dir, CONFIG_DIR, CONFIG_NAME);
+		if (existsSync(candidate)) return candidate;
+		if (dir === root) return undefined;
+		dir = dirname(dir);
+	}
 }
 
-export function loadConfig(configPath = CONFIG_PATH): ShipConfig {
-	if (!existsSync(configPath)) {
+function expandHome(path: string): string {
+	if (path === "~") return homedir();
+	return path.startsWith("~/") ? join(homedir(), path.slice(2)) : path;
+}
+
+export function loadConfig(from?: string): ShipConfig {
+	const configPath = findConfig(from);
+	if (!configPath) {
 		throw new Error(
-			`No ship config at ${configPath}. Create it:\n` +
-				`{\n  "projects": { "project-front": "~/projects/projectFront" },\n  "base": "develop"\n}`,
+			`No ${CONFIG_DIR}/${CONFIG_NAME} found from ${resolve(from ?? process.cwd())} upwards. Create one:\n` +
+				`{\n  "projects": { "project-front": "./project-front" },\n  "base": "develop"\n}`,
 		);
+	}
+	if (!existsSync(configPath)) {
+		throw new Error(`PI_SHIP_CONFIG points at ${configPath}, which does not exist`);
 	}
 
 	let parsed: unknown;
@@ -45,22 +71,31 @@ export function loadConfig(configPath = CONFIG_PATH): ShipConfig {
 
 	const raw = parsed as { projects?: unknown; base?: unknown };
 	if (typeof raw.projects !== "object" || raw.projects === null || Array.isArray(raw.projects)) {
-		throw new Error(`${configPath}: "projects" must be an object of name -> repository path`);
+		throw new Error(`${configPath}: "projects" must be an object of name -> path relative to the workspace root`);
 	}
+
+	// <root>/.pi/ship.json → <root>
+	const root = dirname(dirname(configPath));
 
 	const projects: Record<string, string> = {};
 	for (const [name, path] of Object.entries(raw.projects as Record<string, unknown>)) {
 		if (typeof path !== "string" || !path.trim()) {
 			throw new Error(`${configPath}: project "${name}" must map to a path string`);
 		}
-		projects[name] = expandHome(path.trim());
+		const expanded = expandHome(path.trim());
+		projects[name] = isAbsolute(expanded) ? expanded : resolve(root, expanded);
 	}
 
 	if (Object.keys(projects).length === 0) {
 		throw new Error(`${configPath}: no projects configured`);
 	}
 
-	return { projects, base: typeof raw.base === "string" && raw.base.trim() ? raw.base.trim() : "develop" };
+	return {
+		root,
+		path: configPath,
+		projects,
+		base: typeof raw.base === "string" && raw.base.trim() ? raw.base.trim() : "develop",
+	};
 }
 
 /** Resolves a project name to its repository path, listing the alternatives on a miss. */

@@ -108,7 +108,7 @@ export async function runShipCommand(args: string, ctx: ExtensionCommandContext)
 		const projects = Object.entries(config.projects)
 			.map(([name, path]) => `  ${name} → ${path}`)
 			.join("\n");
-		ctx.ui.notify(`ship: base origin/${config.base}\n${projects}`, "info");
+		ctx.ui.notify(`ship: ${config.path}\nbase origin/${config.base}\n${projects}`, "info");
 		return;
 	}
 
